@@ -112,6 +112,25 @@ function isThenable(x) {
     return !!x && (typeof x === 'object' || typeof x === 'function') && typeof x.then === 'function';
 }
 
+// vm.dump 对 Error 句柄返回的是 {name, message, stack} 普通对象 (非 Error 实例)
+// 直接拼模板字符串会得到 "[object Object]", 真实错误信息被吞掉. 这里提取出可读形式.
+function formatQuickJsDumpedError(dumped) {
+    if (dumped == null) return String(dumped);
+    if (typeof dumped !== 'object') return String(dumped);
+    if (typeof dumped.message === 'string' && dumped.message.length > 0) {
+        const name = typeof dumped.name === 'string' && dumped.name && dumped.name !== 'Error'
+            ? `${dumped.name}: `
+            : '';
+        const stack = typeof dumped.stack === 'string' && dumped.stack ? `\n${dumped.stack}` : '';
+        return `${name}${dumped.message}${stack}`;
+    }
+    try {
+        return JSON.stringify(dumped);
+    } catch {
+        return String(dumped);
+    }
+}
+
 function isSafePathSegment(seg) {
     if (!seg) return false;
     if (seg === '__proto__' || seg === 'prototype' || seg === 'constructor') return false;
@@ -369,7 +388,7 @@ async function runScriptOnce({
     if (preludeResult.error) {
         const msg = vm.dump(preludeResult.error);
         preludeResult.error.dispose();
-        throw new Error(`QuickJS prelude failed: ${msg}`);
+        throw new Error(`QuickJS prelude failed: ${formatQuickJsDumpedError(msg)}`);
     }
     preludeResult.value.dispose();
 
@@ -529,7 +548,7 @@ return ${name};
     if (wrapperEval.error) {
         const msg = vm.dump(wrapperEval.error);
         wrapperEval.error.dispose();
-        throw new Error(`QuickJS compile failed: ${msg}`);
+        throw new Error(`QuickJS compile failed: ${formatQuickJsDumpedError(msg)}`);
     }
     const wrapperFn = wrapperEval.value;
 
@@ -565,7 +584,7 @@ return ${name};
     if (callResult.error) {
         const msg = vm.dump(callResult.error);
         callResult.error.dispose();
-        throw new Error(`QuickJS script threw: ${msg}`);
+        throw new Error(`QuickJS script threw: ${formatQuickJsDumpedError(msg)}`);
     }
 
     const resultHandle = callResult.value;
@@ -590,7 +609,7 @@ return ${name};
                     } catch {
                         // ignore
                     }
-                    throw new Error(`QuickJS executePendingJobs error: ${msg}`);
+                    throw new Error(`QuickJS executePendingJobs error: ${formatQuickJsDumpedError(msg)}`);
                 }
                 continue;
             }
@@ -602,7 +621,7 @@ return ${name};
         if (state.type === 'rejected') {
             const msg = vm.dump(state.error);
             state.error.dispose();
-            throw new Error(`QuickJS promise rejected: ${msg}`);
+            throw new Error(`QuickJS promise rejected: ${formatQuickJsDumpedError(msg)}`);
         }
 
         // fulfilled
