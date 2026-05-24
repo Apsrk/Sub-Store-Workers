@@ -16,17 +16,32 @@ export function createHttpClient() {
 
             debug(`[HTTP] 请求: ${method.toUpperCase()} ${options.url}`);
 
+            // 合并 headers，并大小写不敏感地检查关键头
+            const headers = { ...(options.headers || {}) };
+            const headerKeyLower = {};
+            for (const k of Object.keys(headers)) headerKeyLower[k.toLowerCase()] = k;
+
+            // 关键修复：Cloudflare Workers 默认 UA 是 "Cloudflare-Workers"
+            // 访问被 Cloudflare 加速的域名时会被目标站点的 WAF/Bot 防护拦截 (常见 1010/1020/403)
+            // 调用方未显式指定 UA 时，回落到一个不会被拦截的常见客户端 UA
+            if (!headerKeyLower['user-agent']) {
+                headers['User-Agent'] =
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+            }
+
             const fetchOptions = {
                 method: method.toUpperCase(),
-                headers: { ...options.headers } || {},
+                headers,
+                redirect: 'follow',
             };
 
             // 处理请求体
             if (options.body) {
                 if (typeof options.body === 'object') {
                     fetchOptions.body = JSON.stringify(options.body);
-                    fetchOptions.headers['Content-Type'] =
-                        fetchOptions.headers['Content-Type'] || 'application/json';
+                    if (!headerKeyLower['content-type']) {
+                        fetchOptions.headers['Content-Type'] = 'application/json';
+                    }
                 } else {
                     fetchOptions.body = options.body;
                 }
