@@ -755,21 +755,36 @@ export function ensureSubStoreQuickJsScriptEngineInstalled({
                 debug(`[SubStoreScript] [${requestId2}] run ${name} ${inputHint}`);
             }
 
-            // 把当前请求 URL 的 query 参数合并到 $options 顶层 (e.g. ?type=sub&name=foo)
-            // 上游传入的 $options 字段优先, query 仅作为补充, 避免覆盖系统字段如 _res.
+            // 把当前请求 URL 的 query 参数合并到 $options 顶层 (e.g. ?type=sub&name=foo).
+            // 注意: Sub-Store 的 operator wrapper 内部会 `let { $options } = input` 遮蔽外层参数,
+            // 所以必须同时注入 input.$options, 否则 mihomoProfile / artifact 类脚本读不到.
             const queryParams = extractRequestQueryParams();
-            const mergedOptions = queryParams
+            const mergedTopLevelOptions = queryParams
                 ? { ...queryParams, ...($options || {}) }
                 : $options;
+
+            let mergedInput = input;
+            if (
+                queryParams &&
+                input &&
+                typeof input === 'object' &&
+                !Array.isArray(input) &&
+                (input.$files != null || input.$content != null || input.$options != null || input.$file != null)
+            ) {
+                mergedInput = {
+                    ...input,
+                    $options: { ...queryParams, ...(input.$options || {}) },
+                };
+            }
 
             return await runScriptOnce({
                 name,
                 script: normalizedScript,
                 $arguments,
-                $options: mergedOptions,
+                $options: mergedTopLevelOptions,
                 $substore,
                 hostRoots,
-                callArgs: [input, targetPlatform, context],
+                callArgs: [mergedInput, targetPlatform, context],
                 limits,
             });
         };
