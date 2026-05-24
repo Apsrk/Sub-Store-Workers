@@ -131,6 +131,34 @@ function formatQuickJsDumpedError(dumped) {
     }
 }
 
+// 字符串值的轻量类型推断: 仅识别 true/false/null, 数字保留为字符串避免误转 name 等
+function coerceQueryValue(s) {
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+    if (s === 'null') return null;
+    return s;
+}
+
+// 解析当前请求 URL 的 query 参数, 用于注入 $options.
+// 同名多值取最后一个 (URLSearchParams.get 行为).
+function extractRequestQueryParams() {
+    try {
+        const ctx = globalThis.__substore_get_active_context__?.();
+        const url = ctx?.request?.url;
+        if (!url) return null;
+        const u = new URL(url);
+        if (!u.search) return null;
+        const out = {};
+        for (const key of u.searchParams.keys()) {
+            if (key in out) continue;
+            out[key] = coerceQueryValue(u.searchParams.get(key));
+        }
+        return Object.keys(out).length === 0 ? null : out;
+    } catch {
+        return null;
+    }
+}
+
 function isSafePathSegment(seg) {
     if (!seg) return false;
     if (seg === '__proto__' || seg === 'prototype' || seg === 'constructor') return false;
@@ -726,11 +754,19 @@ export function ensureSubStoreQuickJsScriptEngineInstalled({
                 const inputHint = Array.isArray(input) ? `list(${input.length})` : 'artifact';
                 debug(`[SubStoreScript] [${requestId2}] run ${name} ${inputHint}`);
             }
+
+            // 把当前请求 URL 的 query 参数合并到 $options 顶层 (e.g. ?type=sub&name=foo)
+            // 上游传入的 $options 字段优先, query 仅作为补充, 避免覆盖系统字段如 _res.
+            const queryParams = extractRequestQueryParams();
+            const mergedOptions = queryParams
+                ? { ...queryParams, ...($options || {}) }
+                : $options;
+
             return await runScriptOnce({
                 name,
                 script: normalizedScript,
                 $arguments,
-                $options,
+                $options: mergedOptions,
                 $substore,
                 hostRoots,
                 callArgs: [input, targetPlatform, context],
