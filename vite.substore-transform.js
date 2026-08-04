@@ -71,6 +71,10 @@ export function subStoreTransformPlugin() {
     }
 
     function precompilePeggyParser(contents, id, pluginContext) {
+        if (!/\bpeggy\s*\.\s*generate\s*\(/.test(contents)) {
+            return contents;
+        }
+
         const match = /const\s+grammars\s*=\s*String\.raw`([\s\S]*?)`;/.exec(contents);
         if (!match) {
             pluginContext.error(`[sub-store-transform] ${id} Peggy parser 预编译失败：未找到 grammars`);
