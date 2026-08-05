@@ -131,29 +131,38 @@ function formatQuickJsDumpedError(dumped) {
     }
 }
 
-// 字符串值的轻量类型推断: 仅识别 true/false/null, 数字保留为字符串避免误转 name 等
-function coerceQueryValue(s) {
-    if (s === 'true') return true;
-    if (s === 'false') return false;
-    if (s === 'null') return null;
-    return s;
+const UNSAFE_SCRIPT_OPTION_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const SCRIPT_OPTION_PREFIX = '$';
+
+function coerceQueryValue(value) {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (value === 'null') return null;
+    return value;
+}
+
+export function parsePrefixedScriptOptions(rawUrl) {
+    const url = new URL(rawUrl);
+    const options = {};
+    for (const key of url.searchParams.keys()) {
+        if (key === '$options' || !key.startsWith(SCRIPT_OPTION_PREFIX)) continue;
+
+        const optionKey = key.slice(SCRIPT_OPTION_PREFIX.length);
+        if (!optionKey || UNSAFE_SCRIPT_OPTION_KEYS.has(optionKey)) continue;
+        const values = url.searchParams.getAll(key);
+        options[optionKey] = coerceQueryValue(values[values.length - 1]);
+    }
+    return Object.keys(options).length === 0 ? null : options;
 }
 
 // 解析当前请求 URL 的 query 参数, 用于注入 $options.
-// 同名多值取最后一个 (URLSearchParams.get 行为).
+// 同名多值取最后一个.
 function extractRequestQueryParams() {
     try {
         const ctx = globalThis.__substore_get_active_context__?.();
         const url = ctx?.request?.url;
         if (!url) return null;
-        const u = new URL(url);
-        if (!u.search) return null;
-        const out = {};
-        for (const key of u.searchParams.keys()) {
-            if (key in out) continue;
-            out[key] = coerceQueryValue(u.searchParams.get(key));
-        }
-        return Object.keys(out).length === 0 ? null : out;
+        return parsePrefixedScriptOptions(url);
     } catch {
         return null;
     }
@@ -755,7 +764,8 @@ export function ensureSubStoreQuickJsScriptEngineInstalled({
                 debug(`[SubStoreScript] [${requestId2}] run ${name} ${inputHint}`);
             }
 
-            // 把当前请求 URL 的 query 参数合并到 $options 顶层 (e.g. ?type=sub&name=foo).
+            // 把 $* query 参数去掉 $ 前缀后合并到 $options 顶层.
+            // $options 保留给 Sub-Store 官方参数处理，不做二次封装.
             // 注意: Sub-Store 的 operator wrapper 内部会 `let { $options } = input` 遮蔽外层参数,
             // 所以必须同时注入 input.$options, 否则 mihomoProfile / artifact 类脚本读不到.
             const queryParams = extractRequestQueryParams();
